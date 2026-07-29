@@ -99,3 +99,26 @@ def test_unaddressed_issues_block_autofix():
     # Should NOT autofix when issues remain unaddressed
     assert risk["should_autofix"] is False
     assert "unaddressed" in " ".join(risk["reasons"]).lower() or risk["score"] < 75
+
+
+def test_large_rewrite_is_not_autofixed_even_when_low_severity():
+    # [Part 4 guardrail] A low-severity issue keeps the score high (level "low"),
+    # but a fix that rewrites most of the file should still be held for a human.
+    # Without the over-editing guardrail this would auto-apply; with it, it must not.
+    original = "def add(a, b):\n    print(a + b)\n    return a + b\n"
+    fixed = (
+        "import logging\n\n"
+        "def add(a, b):\n"
+        "    logging.info('adding %s and %s', a, b)\n"
+        "    result = a + b\n"
+        "    logging.info('result is %s', result)\n"
+        "    return result\n"
+    )
+    risk = assess_risk(
+        original_code=original,
+        fixed_code=fixed,
+        issues=[{"type": "Code Quality", "severity": "Low", "msg": "print"}],
+    )
+    assert risk["level"] == "low"          # score is high...
+    assert risk["should_autofix"] is False  # ...but the rewrite is too large to auto-apply
+    assert any("too large" in r.lower() for r in risk["reasons"])

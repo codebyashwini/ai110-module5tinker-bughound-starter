@@ -89,6 +89,15 @@ class BugHoundAgent:
             self._log("ANALYZE", "LLM output was not parseable JSON. Falling back to heuristics.")
             return self._heuristic_analyze(code_snippet)
 
+        # [Part 2 reliability change] Trust the model's structure only if every
+        # issue carries a severity we recognize. A stray value like "CRITICAL"
+        # or "unknown" means the response doesn't match our contract, so we fall
+        # back to the deterministic heuristic analyzer rather than feed a bogus
+        # severity into the risk scorer downstream.
+        if not self._severities_valid(issues):
+            self._log("ANALYZE", "LLM returned an invalid severity value. Falling back to heuristics.")
+            return self._heuristic_analyze(code_snippet)
+
         # UPDATED: Added hybrid validation to ensure critical issues aren't missed by LLM
         validated_issues = self._validate_critical_issues(code_snippet, issues)
         if len(validated_issues) > len(issues):
@@ -301,6 +310,11 @@ class BugHoundAgent:
         if match:
             return match.group(1)
         return text
+
+    def _severities_valid(self, issues: List[Dict[str, str]]) -> bool:
+        """Return True only if every issue's severity is Low/Medium/High."""
+        allowed = {"low", "medium", "high"}
+        return all(str(i.get("severity", "")).lower() in allowed for i in issues)
 
     def _can_call_llm(self) -> bool:
         return self.client is not None and hasattr(self.client, "complete")

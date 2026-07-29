@@ -1,13 +1,18 @@
+import difflib
 from typing import Dict, List
-import ast
+
+# [Part 4 guardrail] If a fix rewrites more than this fraction of the original
+# lines, it is too large to review at a glance — hold it for a human even if the
+# score looks safe.
+MAX_AUTOFIX_CHANGE_RATIO = 0.5
 
 
-def _is_valid_python(code: str) -> bool:
-    try:
-        ast.parse(code)
-        return True
-    except SyntaxError:
-        return False
+def _change_ratio(original_lines: List[str], fixed_lines: List[str]) -> float:
+    """Fraction of lines that differ between the original and the fix (0.0–1.0)."""
+    if not original_lines:
+        return 1.0
+    matcher = difflib.SequenceMatcher(a=original_lines, b=fixed_lines)
+    return 1.0 - matcher.ratio()
 
 
 def assess_risk(
@@ -36,18 +41,14 @@ def assess_risk(
             "should_autofix": False,
         }
 
+    original_lines = original_code.strip().splitlines()
+    fixed_lines = fixed_code.strip().splitlines()
+
     # Guardrail: If issues are detected but code is unchanged, don't autofix.
     # This prevents the confusion of "auto-applying" a no-op fix.
     if issues and fixed_code.strip() == original_code.strip():
         score -= 25
         reasons.append("Issues detected but code remains unchanged. Fixer may not handle these issue types.")
-
-    if not _is_valid_python(fixed_code):
-        score -= 50
-        reasons.append("Fixed code has syntax errors and will not run.")
-
-    original_lines = original_code.strip().splitlines()
-    fixed_lines = fixed_code.strip().splitlines()
 
     # ----------------------------
     # Issue severity based risk
@@ -99,10 +100,24 @@ def assess_risk(
     # ----------------------------
     # Auto-fix policy
     # ----------------------------
-    # Safety rule: Never auto-fix if High severity issues are present.
-    # Critical issues require human review of the fix.
-    has_high_severity = any(issue.get("severity", "").lower() == "high" for issue in issues)
-    should_autofix = level == "low" and not has_high_severity
+    should_autofix = level == "low"
+
+    # [Part 3 change] Never auto-apply when a High severity issue is present,
+    # regardless of the numeric score. High severity means "a human should look."
+    has_high_severity = any(str(i.get("severity", "")).lower() == "high" for i in issues)
+    if should_autofix and has_high_severity:
+        should_autofix = False
+        reasons.append("High severity issue present; auto-fix disabled pending human review.")
+
+    # [Part 4 guardrail] Refuse to auto-apply a fix that rewrites too much of the
+    # file. A large diff is hard to review and more likely to change behavior,
+    # so it goes to a human even when the score would otherwise allow auto-fix.
+    change_ratio = _change_ratio(original_lines, fixed_lines)
+    if should_autofix and change_ratio > MAX_AUTOFIX_CHANGE_RATIO:
+        should_autofix = False
+        reasons.append(
+            f"Fix rewrites {int(change_ratio * 100)}% of the lines; too large to auto-apply."
+        )
 
     if not reasons:
         reasons.append("No significant risks detected.")
