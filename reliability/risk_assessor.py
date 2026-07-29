@@ -1,4 +1,13 @@
 from typing import Dict, List
+import ast
+
+
+def _is_valid_python(code: str) -> bool:
+    try:
+        ast.parse(code)
+        return True
+    except SyntaxError:
+        return False
 
 
 def assess_risk(
@@ -26,6 +35,10 @@ def assess_risk(
             "reasons": ["No fix was produced."],
             "should_autofix": False,
         }
+
+    if not _is_valid_python(fixed_code):
+        score -= 50
+        reasons.append("Fixed code has syntax errors and will not run.")
 
     original_lines = original_code.strip().splitlines()
     fixed_lines = fixed_code.strip().splitlines()

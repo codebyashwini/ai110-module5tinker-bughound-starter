@@ -155,6 +155,26 @@ class BugHoundAgent:
                 }
             )
 
+        if re.search(r"def\s+\w+\([^)]*\):\s*\n\s+[^\"]", code):
+            if '"""' not in code and "'''" not in code:
+                issues.append(
+                    {
+                        "type": "Maintainability",
+                        "severity": "Low",
+                        "msg": "Missing docstring. Functions should document their purpose and parameters.",
+                    }
+                )
+
+        if re.search(r"\w+\s*=\s*[0-9]+", code) and "magic" not in code.lower():
+            if not re.search(r"#.*[0-9]+", code):
+                issues.append(
+                    {
+                        "type": "Code Quality",
+                        "severity": "Low",
+                        "msg": "Found magic numbers without explanation. Use named constants instead.",
+                    }
+                )
+
         return issues
 
     def _heuristic_fix(self, code: str, issues: List[Dict[str, str]]) -> str:
@@ -166,9 +186,29 @@ class BugHoundAgent:
         if any(i.get("type") == "Code Quality" for i in issues):
             if "import logging" not in fixed:
                 fixed = "import logging\n\n" + fixed
-            fixed = fixed.replace("print(", "logging.info(")
+            fixed = self._convert_print_to_logging(fixed)
 
         return fixed
+
+    def _convert_print_to_logging(self, code: str) -> str:
+        lines = code.split('\n')
+        result = []
+        for line in lines:
+            match = re.search(r'(\s*)print\((.*)\)', line)
+            if match:
+                indent = match.group(1)
+                args_str = match.group(2).strip()
+
+                if ',' in args_str:
+                    args_list = [arg.strip() for arg in args_str.split(',')]
+                    format_str = ' '.join(['%s'] * len(args_list))
+                    all_args = f'"{format_str}", {", ".join(args_list)}'
+                    result.append(f'{indent}logging.debug({all_args})')
+                else:
+                    result.append(f'{indent}logging.info({args_str})')
+            else:
+                result.append(line)
+        return '\n'.join(result)
 
     # ----------------------------
     # Parsing + utilities

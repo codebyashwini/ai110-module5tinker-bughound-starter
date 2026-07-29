@@ -9,11 +9,8 @@ class MockClient:
     """
 
     def complete(self, system_prompt: str, user_prompt: str) -> str:
-        # Very small, predictable behavior for demos.
-        if "Return ONLY valid JSON" in system_prompt:
-            # Purposely not JSON to force fallback unless students change behavior.
-            return "I found some issues, but I'm not returning JSON right now."
-        return "# MockClient: no rewrite available in offline mode.\n"
+        # Return empty string to force heuristic fallback in both analyze and fix steps.
+        return ""
 
 
 class GeminiClient:
