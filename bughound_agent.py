@@ -89,7 +89,12 @@ class BugHoundAgent:
             self._log("ANALYZE", "LLM output was not parseable JSON. Falling back to heuristics.")
             return self._heuristic_analyze(code_snippet)
 
-        return issues
+        # UPDATED: Added hybrid validation to ensure critical issues aren't missed by LLM
+        validated_issues = self._validate_critical_issues(code_snippet, issues)
+        if len(validated_issues) > len(issues):
+            self._log("ANALYZE", f"Added {len(validated_issues) - len(issues)} critical issue(s) from heuristics.")
+
+        return validated_issues
 
     def propose_fix(self, code_snippet: str, issues: List[Dict[str, str]]) -> str:
         if not issues:
@@ -209,6 +214,35 @@ class BugHoundAgent:
             else:
                 result.append(line)
         return '\n'.join(result)
+
+    def _validate_critical_issues(self, code: str, llm_issues: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """
+        Verify that critical issues detected by heuristics are present in LLM output.
+        If a critical issue (High severity) is missed by LLM, add it back.
+        This is a safety net to prevent the agent from missing reliability issues.
+        """
+        heuristic_issues = self._heuristic_analyze(code)
+
+        # Extract types/severities from LLM output for quick lookup
+        llm_types = {(i.get("type", ""), i.get("severity", "")) for i in llm_issues}
+
+        # Critical issues that should always be caught
+        critical_patterns = {
+            ("Reliability", "High"),  # bare except blocks
+        }
+
+        result = list(llm_issues)
+
+        # Check if any critical pattern is missing from LLM output but present in heuristics
+        for heuristic_issue in heuristic_issues:
+            h_type = heuristic_issue.get("type", "")
+            h_severity = heuristic_issue.get("severity", "")
+
+            if (h_type, h_severity) in critical_patterns and (h_type, h_severity) not in llm_types:
+                # Critical issue was missed by LLM; add it back
+                result.append(heuristic_issue)
+
+        return result
 
     # ----------------------------
     # Parsing + utilities
