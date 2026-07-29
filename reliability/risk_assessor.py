@@ -36,6 +36,12 @@ def assess_risk(
             "should_autofix": False,
         }
 
+    # Guardrail: If issues are detected but code is unchanged, don't autofix.
+    # This prevents the confusion of "auto-applying" a no-op fix.
+    if issues and fixed_code.strip() == original_code.strip():
+        score -= 25
+        reasons.append("Issues detected but code remains unchanged. Fixer may not handle these issue types.")
+
     if not _is_valid_python(fixed_code):
         score -= 50
         reasons.append("Fixed code has syntax errors and will not run.")
@@ -93,7 +99,10 @@ def assess_risk(
     # ----------------------------
     # Auto-fix policy
     # ----------------------------
-    should_autofix = level == "low"
+    # Safety rule: Never auto-fix if High severity issues are present.
+    # Critical issues require human review of the fix.
+    has_high_severity = any(issue.get("severity", "").lower() == "high" for issue in issues)
+    should_autofix = level == "low" and not has_high_severity
 
     if not reasons:
         reasons.append("No significant risks detected.")
